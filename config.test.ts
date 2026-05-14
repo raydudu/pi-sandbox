@@ -51,4 +51,9 @@ describe("loadConfig", () => {
       assert.equal(isPathAllowed(path, config), false);
     }
   });
+
+  it("defaults denyRead to an empty list", () => {
+    const { config } = loadConfig("/workspace");
+    assert.deepEqual(config.denyRead, []);
+  });
 });

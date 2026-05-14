@@ -27,7 +27,7 @@ pi -e ./index.ts
 `pi-sandbox` adds two layers of protection:
 
 - It overrides Pi's `bash` tool and runs shell commands inside an OS sandbox.
-- It intercepts file mutation tools such as `write`, `edit`, `delete`, and `move`, and blocks paths outside the configured writable roots.
+- It intercepts file tools and blocks writes outside configured writable roots. It can also block selected read paths for `read`, `grep`, `find`, and `ls`.
 
 Behavior depends on the platform:
 
@@ -44,6 +44,8 @@ The extension reads `sandbox.json` from:
 
 Supported fields:
 
+- `enabled`: turn the extension on or off globally
+- `denyRead`: optional paths blocked for Pi's built-in read-only file tools
 - `writable`: directories Pi is allowed to modify
 - `denyWithin`: subpaths that stay blocked even if they are inside a writable directory
 - `network`: whether outbound network access is allowed
@@ -53,6 +55,8 @@ Example:
 
 ```json
 {
+  "enabled": true,
+  "denyRead": ["${HOME}/.ssh", "${HOME}/.aws"],
   "writable": ["${WORKSPACE}", "${TMP}"],
   "denyWithin": ["${WORKSPACE}/.git/hooks"],
   "network": true,
@@ -70,6 +74,12 @@ By default, the extension allows writes to:
 
 - `${WORKSPACE}`
 - `${TMP}`
+- `${HOME}/.pi`
+- Pi agent dir
+
+By default, the extension does not block reads unless `denyRead` is configured.
+
+For recursive read tools like `grep` and `find`, pi-sandbox blocks starting from a parent path that would traverse into a denied subtree.
 
 And blocks:
 
@@ -84,6 +94,21 @@ The extension registers a Pi command:
 ```
 
 It shows the active provider, network mode, writable paths, and deny rules.
+
+Runtime controls:
+
+```text
+/sandbox-enable
+/sandbox-disable
+/sandbox-reset
+```
+
+Startup flags:
+
+```bash
+pi -e ./index.ts --sandbox
+pi -e ./index.ts --no-sandbox
+```
 
 ## Package
 

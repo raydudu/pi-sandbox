@@ -24,19 +24,54 @@ export function resolveToolPath(cwd: string, targetPath: string): string {
   return resolve(cwd, expandHomePath(targetPath));
 }
 
-export function isPathAllowed(absolutePath: string, config: SandboxConfig): boolean {
+function isPathWithinRoots(absolutePath: string, allowedRoots: string[], deniedRoots: string[]): boolean {
   const normPath = stripTrailingSep(resolve(absolutePath));
-  for (const denied of config.denyWithin) {
+  for (const denied of deniedRoots) {
     const d = stripTrailingSep(resolve(denied));
     if (normPath === d || normPath.startsWith(d + "/")) {
       return false;
     }
   }
-  for (const allowed of config.writable) {
+  for (const allowed of allowedRoots) {
     const a = stripTrailingSep(resolve(allowed));
     if (normPath === a || normPath.startsWith(a + "/")) {
       return true;
     }
   }
   return false;
+}
+
+export function isPathDenied(absolutePath: string, deniedRoots: string[]): boolean {
+  const normPath = stripTrailingSep(resolve(absolutePath));
+  for (const denied of deniedRoots) {
+    const d = stripTrailingSep(resolve(denied));
+    if (normPath === d || normPath.startsWith(d + "/")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function isPathReadable(absolutePath: string, config: SandboxConfig): boolean {
+  return !isPathDenied(absolutePath, config.denyRead);
+}
+
+export function isPathSearchable(absolutePath: string, config: SandboxConfig): boolean {
+  const normPath = stripTrailingSep(resolve(absolutePath));
+
+  for (const denied of config.denyRead) {
+    const d = stripTrailingSep(resolve(denied));
+    if (normPath === d || normPath.startsWith(d + "/")) {
+      return false;
+    }
+    if (d.startsWith(normPath + "/")) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export function isPathAllowed(absolutePath: string, config: SandboxConfig): boolean {
+  return isPathWithinRoots(absolutePath, config.writable, config.denyWithin);
 }

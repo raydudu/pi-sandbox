@@ -1,7 +1,7 @@
-import { existsSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { resolve as pathResolve } from "node:path";
-import { platform } from "node:os";
+import { resolve as pathResolve, join } from "node:path";
+import { platform, tmpdir } from "node:os";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
 import type { SandboxProvider, SandboxConfig, SandboxProviderType } from "./types.ts";
 import { stripTrailingSep } from "./guard.ts";
@@ -27,7 +27,7 @@ class SandboxExecProvider implements SandboxProvider {
   }
 
   wrap(inner: BashOperations, _cwd: string, config: SandboxConfig): BashOperations {
-    const profile = this.buildProfile(config);
+    const profile = buildSandboxExecProfile(config);
 
     return {
       ...inner,
@@ -37,73 +37,87 @@ class SandboxExecProvider implements SandboxProvider {
     };
   }
 
-  private buildProfile(config: SandboxConfig): string {
-    const lines = [
-      "(version 1)",
-      "(deny default (with message \"pi-sandbox: operation not permitted\"))",
-      "; global read-only filesystem",
-      "(allow file-read*)",
-      "; child processes inherit this policy",
-      "(allow process-exec)",
-      "(allow process-fork)",
-      "(allow signal (target self))",
-      "(allow signal (target children))",
-      "; /dev/null writes only",
-      "(allow file-write-data",
-      "  (require-all",
-      '    (path "/dev/null")',
-      "    (vnode-type CHARACTER-DEVICE)))",
-      "; device access",
-      '(allow file-write* (path-prefix "/dev/tty"))',
-      '(allow file-ioctl  (path-prefix "/dev/tty"))',
-      '(allow file-write* (path "/dev/dtracehelper"))',
-      '(allow file-write* (path "/dev/autofs_nowait"))',
-    ];
+}
 
-    if (config.writable.length > 0) {
-      lines.push("; writable paths");
-      lines.push("(allow file-write*");
-      for (const p of config.writable) {
-        lines.push(`  (subpath "${p.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`);
-      }
-      lines.push(")");
+function escapeSbplPath(path: string): string {
+  return path.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+export function buildSandboxExecProfile(config: SandboxConfig): string {
+  const lines = [
+    "(version 1)",
+    "(deny default (with message \"pi-sandbox: operation not permitted\"))",
+    "; global read-only filesystem",
+    "(allow file-read*)",
+    "; child processes inherit this policy",
+    "(allow process-exec)",
+    "(allow process-fork)",
+    "(allow signal (target self))",
+    "(allow signal (target children))",
+    "; /dev/null writes only",
+    "(allow file-write-data",
+    "  (require-all",
+    '    (path "/dev/null")',
+    "    (vnode-type CHARACTER-DEVICE)))",
+    "; device access",
+    '(allow file-write* (path-prefix "/dev/tty"))',
+    '(allow file-ioctl  (path-prefix "/dev/tty"))',
+    '(allow file-write* (path "/dev/dtracehelper"))',
+    '(allow file-write* (path "/dev/autofs_nowait"))',
+  ];
+
+  if (config.denyRead.length > 0) {
+    lines.push("; denied read paths");
+    for (const p of config.denyRead) {
+      const ep = escapeSbplPath(p);
+      lines.push(`(deny file-read* (literal "${ep}"))`);
+      lines.push(`(deny file-read* (subpath "${ep}"))`);
     }
-
-    for (const p of config.denyWithin) {
-      const ep = p.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      lines.push(`(deny file-write* (subpath "${ep}"))`);
-      lines.push(`(deny file-write-unlink (subpath "${ep}"))`);
-      lines.push(`(deny file-write-create (subpath "${ep}"))`);
-    }
-
-    lines.push(
-      "; mach services — missing entries cause hangs",
-      "(allow mach-lookup",
-      '  (global-name "com.apple.logd")',
-      '  (global-name "com.apple.system.logger")',
-      '  (global-name "com.apple.system.opendirectoryd.api")',
-      '  (global-name "com.apple.system.opendirectoryd.membership")',
-      '  (global-name "com.apple.bsd.dirhelper")',
-      '  (global-name "com.apple.cfprefsd.daemon")',
-      '  (global-name "com.apple.cfprefsd.agent")',
-      '  (global-name "com.apple.SecurityServer"))',
-      "; hardware + kernel info",
-      "(allow sysctl-read)",
-    );
-
-    if (config.network) {
-      lines.push(
-        "; network access",
-        "(allow network*)",
-        "(allow system-socket)",
-        "(allow mach-lookup",
-        '  (global-name "com.apple.mDNSResponder")',
-        '  (global-name "com.apple.mDNSResponderHelper"))',
-      );
-    }
-
-    return lines.join("\n");
   }
+
+  if (config.writable.length > 0) {
+    lines.push("; writable paths");
+    lines.push("(allow file-write*");
+    for (const p of config.writable) {
+      lines.push(`  (subpath "${escapeSbplPath(p)}")`);
+    }
+    lines.push(")");
+  }
+
+  for (const p of config.denyWithin) {
+    const ep = escapeSbplPath(p);
+    lines.push(`(deny file-write* (subpath "${ep}"))`);
+    lines.push(`(deny file-write-unlink (subpath "${ep}"))`);
+    lines.push(`(deny file-write-create (subpath "${ep}"))`);
+  }
+
+  lines.push(
+    "; mach services — missing entries cause hangs",
+    "(allow mach-lookup",
+    '  (global-name "com.apple.logd")',
+    '  (global-name "com.apple.system.logger")',
+    '  (global-name "com.apple.system.opendirectoryd.api")',
+    '  (global-name "com.apple.system.opendirectoryd.membership")',
+    '  (global-name "com.apple.bsd.dirhelper")',
+    '  (global-name "com.apple.cfprefsd.daemon")',
+    '  (global-name "com.apple.cfprefsd.agent")',
+    '  (global-name "com.apple.SecurityServer"))',
+    "; hardware + kernel info",
+    "(allow sysctl-read)",
+  );
+
+  if (config.network) {
+    lines.push(
+      "; network access",
+      "(allow network*)",
+      "(allow system-socket)",
+      "(allow mach-lookup",
+      '  (global-name "com.apple.mDNSResponder")',
+      '  (global-name "com.apple.mDNSResponderHelper"))',
+    );
+  }
+
+  return lines.join("\n");
 }
 
 // ─── Linux bubblewrap ──────────────────────────────────────────────────────
@@ -131,15 +145,20 @@ class BubblewrapProvider implements SandboxProvider {
     return {
       ...inner,
       exec(command, cwd, options) {
-        const args = buildBwrapArgs(cwd, config, workspaceDir);
-        return spawnSandboxedCommand("bwrap", args, command, cwd, options);
+        const setup = buildBwrapSetup(cwd, config, workspaceDir);
+        return spawnSandboxedCommand("bwrap", setup.args, command, cwd, options, setup.cleanup);
       },
     };
   }
 }
 
-function buildBwrapArgs(cwd: string, config: SandboxConfig, workspaceDir: string): string[] {
-  const args: string[] = ["bwrap"];
+export function buildBwrapSetup(
+  cwd: string,
+  config: SandboxConfig,
+  workspaceDir: string,
+): { args: string[]; cleanup: () => void } {
+  const args: string[] = [];
+  const cleanupDirs: string[] = [];
 
   args.push("--unshare-all");
   args.push("--die-with-parent");
@@ -180,10 +199,49 @@ function buildBwrapArgs(cwd: string, config: SandboxConfig, workspaceDir: string
     }
   }
 
+  for (const p of config.denyRead) {
+    if (!existsSync(p)) {
+      continue;
+    }
+    const overlay = createDenyReadOverlay(p);
+    if (!overlay) {
+      continue;
+    }
+    cleanupDirs.push(overlay.cleanupDir);
+    args.push("--ro-bind", overlay.source, p);
+  }
+
   const chdirTarget = resolveChdirTarget(cwd, config.writable, workspaceDir);
   args.push("--chdir", chdirTarget);
-  args.push("--");
-  return args;
+  return {
+    args,
+    cleanup: () => {
+      for (const dir of cleanupDirs) {
+        try {
+          rmSync(dir, { recursive: true, force: true });
+        } catch {
+          // best effort cleanup
+        }
+      }
+    },
+  };
+}
+
+function createDenyReadOverlay(targetPath: string): { source: string; cleanupDir: string } | null {
+  const cleanupDir = mkdtempSync(join(tmpdir(), "pi-sandbox-denyread-"));
+  const stat = statSync(targetPath);
+
+  if (stat.isDirectory()) {
+    const emptyDir = join(cleanupDir, "empty-dir");
+    mkdirSync(emptyDir);
+    chmodSync(emptyDir, 0o000);
+    return { source: emptyDir, cleanupDir };
+  }
+
+  const emptyFile = join(cleanupDir, "empty-file");
+  writeFileSync(emptyFile, "");
+  chmodSync(emptyFile, 0o000);
+  return { source: emptyFile, cleanupDir };
 }
 
 function isUnderBindRoot(target: string, roots: Set<string>): boolean {
@@ -234,10 +292,21 @@ function spawnSandboxedCommand(
     timeout?: number;
     env?: NodeJS.ProcessEnv;
   },
+  cleanup?: () => void,
 ): Promise<{ exitCode: number | null }> {
   return new Promise((resolve, reject) => {
+    let cleanedUp = false;
+    const runCleanup = () => {
+      if (cleanedUp) {
+        return;
+      }
+      cleanedUp = true;
+      cleanup?.();
+    };
+
     const child = spawn(binary, [...args, "--", "/bin/sh", "-c", command], {
       cwd,
+      detached: process.platform !== "win32",
       env: options.env ?? process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -247,7 +316,15 @@ function spawnSandboxedCommand(
 
     const killChild = () => {
       if (!child.killed) {
-        child.kill("SIGKILL");
+        try {
+          if (process.platform !== "win32" && child.pid) {
+            process.kill(-child.pid, "SIGKILL");
+          } else {
+            child.kill("SIGKILL");
+          }
+        } catch {
+          child.kill("SIGKILL");
+        }
       }
     };
 
@@ -275,11 +352,13 @@ function spawnSandboxedCommand(
     child.on("error", (err) => {
       if (timeoutHandle) clearTimeout(timeoutHandle);
       if (options.signal) options.signal.removeEventListener("abort", onAbort);
+      runCleanup();
       reject(err);
     });
     child.on("close", (code) => {
       if (timeoutHandle) clearTimeout(timeoutHandle);
       if (options.signal) options.signal.removeEventListener("abort", onAbort);
+      runCleanup();
       if (options.signal?.aborted) {
         reject(new Error("aborted"));
         return;

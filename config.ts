@@ -35,6 +35,7 @@ export function createPathResolver(workspaceDir: string): PathResolver {
   };
 }
 
+const DEFAULT_DENY_READ: string[] = [];
 const DEFAULT_WRITABLE = ["${WORKSPACE}", "${TMP}"];
 const DEFAULT_DENY_WITHIN = ["${WORKSPACE}/.git/hooks"];
 
@@ -71,6 +72,7 @@ export function loadConfig(workspaceDir: string): { config: SandboxConfig; pathR
   return {
     config: {
       enabled: resolveEnabled(raw.enabled),
+      denyRead: mergeDenyRead(raw.denyRead, pathResolver),
       writable: mergeWritable(raw.writable, pathResolver),
       denyWithin: mergeDenyWithin(raw.denyWithin, pathResolver),
       network: raw.network ?? true,
@@ -91,6 +93,12 @@ function mergeWritable(raw: unknown, resolver: PathResolver): string[] {
   const resolved = resolveList(raw, DEFAULT_WRITABLE, resolver);
   const merged = [...resolved, ...getRequiredWritablePaths(resolver)];
   return [...new Set(merged.map((p) => resolve(p)))];
+}
+
+function mergeDenyRead(raw: unknown, resolver: PathResolver): string[] {
+  const resolved = resolveList(raw, [], resolver);
+  const merged = [...DEFAULT_DENY_READ, ...resolved];
+  return [...new Set(merged.map((p) => resolve(resolver.resolve(p))))];
 }
 
 function mergeDenyWithin(raw: unknown, resolver: PathResolver): string[] {

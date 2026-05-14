@@ -8,7 +8,7 @@ import { resolve, dirname, basename, join } from "node:path";
 import { realpathSync, readFileSync } from "node:fs";
 import { loadConfig, isPathAllowed } from "./config.ts";
 import { selectProvider } from "./providers.ts";
-import { resolveToolPath } from "./guard.ts";
+import { isPathReadable, isPathSearchable, resolveToolPath } from "./guard.ts";
 
 let _version = "unknown";
 try {
@@ -21,16 +21,43 @@ try {
 export default function (pi: ExtensionAPI) {
   const workspaceDir = process.cwd();
   let runtimeEnabledOverride: boolean | undefined;
+  const warnedUnavailableProviders = new Set<string>();
+
+  pi.registerFlag("sandbox", {
+    description: "Enable pi-sandbox for this Pi process",
+    type: "boolean",
+    default: false,
+  });
+  pi.registerFlag("no-sandbox", {
+    description: "Disable pi-sandbox for this Pi process",
+    type: "boolean",
+    default: false,
+  });
+
+  const forceSandbox = pi.getFlag("sandbox") === true;
+  const forceNoSandbox = pi.getFlag("no-sandbox") === true;
+  if (forceSandbox && forceNoSandbox) {
+    console.warn("[pi-sandbox] Both --sandbox and --no-sandbox were provided; --no-sandbox wins.");
+    runtimeEnabledOverride = false;
+  } else if (forceSandbox) {
+    runtimeEnabledOverride = true;
+  } else if (forceNoSandbox) {
+    runtimeEnabledOverride = false;
+  }
 
   function getState() {
     const { config } = loadConfig(workspaceDir);
     const provider = selectProvider(config.provider);
 
     if (config.provider && config.provider !== "auto" && !provider.available()) {
-      console.warn(
-        `[pi-sandbox] Forced provider "${config.provider}" is not available on this system. ` +
-          `Falling back to automatic detection. Set provider to "auto" to suppress this warning.`,
-      );
+      const warningKey = `${config.provider}:${workspaceDir}`;
+      if (!warnedUnavailableProviders.has(warningKey)) {
+        warnedUnavailableProviders.add(warningKey);
+        console.warn(
+          `[pi-sandbox] Forced provider "${config.provider}" is not available on this system. ` +
+            `Falling back to automatic detection. Set provider to "auto" to suppress this warning.`,
+        );
+      }
     }
 
     const activeProvider = provider.available() ? provider : selectProvider("auto");
@@ -141,6 +168,52 @@ export default function (pi: ExtensionAPI) {
         }
       }
     }
+
+    if (isToolCallEventType("read", event)) {
+      const targetPath = event.input?.path;
+      if (targetPath) {
+        const absolute = resolveRealPath(resolveToolPath(cwd, targetPath));
+        if (!isPathReadable(absolute, config)) {
+          return {
+            block: true,
+            reason: `pi-sandbox: read of "${targetPath}" blocked (matches denyRead: ${config.denyRead.join(", ")})`,
+          };
+        }
+      }
+    }
+
+    if (isToolCallEventType("grep", event)) {
+      const targetPath = event.input?.path ?? ".";
+      const absolute = resolveRealPath(resolveToolPath(cwd, targetPath));
+      if (!isPathSearchable(absolute, config)) {
+        return {
+          block: true,
+          reason: `pi-sandbox: grep in "${targetPath}" blocked (matches denyRead: ${config.denyRead.join(", ")})`,
+        };
+      }
+    }
+
+    if (isToolCallEventType("find", event)) {
+      const targetPath = event.input?.path ?? ".";
+      const absolute = resolveRealPath(resolveToolPath(cwd, targetPath));
+      if (!isPathSearchable(absolute, config)) {
+        return {
+          block: true,
+          reason: `pi-sandbox: find in "${targetPath}" blocked (matches denyRead: ${config.denyRead.join(", ")})`,
+        };
+      }
+    }
+
+    if (isToolCallEventType("ls", event)) {
+      const targetPath = event.input?.path ?? ".";
+      const absolute = resolveRealPath(resolveToolPath(cwd, targetPath));
+      if (!isPathReadable(absolute, config)) {
+        return {
+          block: true,
+          reason: `pi-sandbox: ls of "${targetPath}" blocked (matches denyRead: ${config.denyRead.join(", ")})`,
+        };
+      }
+    }
   });
 
   // ── User bash guard (user-typed !commands) ──────────────────────────────
@@ -166,6 +239,12 @@ export default function (pi: ExtensionAPI) {
         `Writable:`,
         ...config.writable.map((p) => `  - ${p}`),
       ];
+      if (config.denyRead.length > 0) {
+        lines.push("Deny-read:");
+        for (const p of config.denyRead) {
+          lines.push(`  - ${p}`);
+        }
+      }
       if (config.denyWithin.length > 0) {
         lines.push("Deny-within:");
         for (const p of config.denyWithin) {
