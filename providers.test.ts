@@ -10,6 +10,7 @@ describe("buildSandboxExecProfile", () => {
   it("adds denyRead rules to the sandbox-exec profile", () => {
     const config: SandboxConfig = {
       enabled: true,
+      readOnly: false,
       denyRead: ["/etc/passwd", "/Users/test/.ssh"],
       writable: ["/workspace"],
       denyWithin: ["/workspace/.git/hooks"],
@@ -35,6 +36,7 @@ describe("buildBwrapSetup", () => {
 
       const config: SandboxConfig = {
         enabled: true,
+        readOnly: false,
         denyRead: [secretFile, secretDir],
         writable: [workspace],
         denyWithin: [],
@@ -71,6 +73,35 @@ describe("buildBwrapSetup", () => {
     } finally {
       rmSync(workspace, { recursive: true, force: true });
       rmSync(secretDir, { recursive: true, force: true });
+    }
+  });
+
+  it("mounts /tmp read-only in read-only mode", () => {
+    const workspace = mkdtempSync(join(tmpdir(), "pi-sandbox-workspace-"));
+    try {
+      const config: SandboxConfig = {
+        enabled: true,
+        readOnly: true,
+        denyRead: [],
+        writable: [],
+        denyWithin: [],
+        network: true,
+      };
+
+      const setup = buildBwrapSetup(workspace, config, workspace);
+      try {
+        const tmpOverlayIndex = setup.args.findIndex(
+          (_arg, index) => setup.args[index] === "--ro-bind" && setup.args[index + 2] === "/tmp",
+        );
+
+        assert.notEqual(tmpOverlayIndex, -1);
+        const tmpOverlaySource = setup.args[tmpOverlayIndex + 1];
+        assert.equal(statSync(tmpOverlaySource).mode & 0o777, 0o555);
+      } finally {
+        setup.cleanup();
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
     }
   });
 });

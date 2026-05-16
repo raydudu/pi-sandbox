@@ -186,6 +186,12 @@ export function buildBwrapSetup(
     }
   }
 
+  if (config.readOnly) {
+    const readOnlyTmp = createReadOnlyDirOverlay();
+    cleanupDirs.push(readOnlyTmp.cleanupDir);
+    args.push("--ro-bind", readOnlyTmp.source, "/tmp");
+  }
+
   // always mount workspace as read-only if not already covered
   const ws = stripTrailingSep(pathResolve(workspaceDir));
   if (existsSync(workspaceDir) && !isUnderBindRoot(ws, bindMounted)) {
@@ -242,6 +248,14 @@ function createDenyReadOverlay(targetPath: string): { source: string; cleanupDir
   writeFileSync(emptyFile, "");
   chmodSync(emptyFile, 0o000);
   return { source: emptyFile, cleanupDir };
+}
+
+function createReadOnlyDirOverlay(): { source: string; cleanupDir: string } {
+  const cleanupDir = mkdtempSync(join(tmpdir(), "pi-sandbox-readonly-"));
+  const dir = join(cleanupDir, "tmp");
+  mkdirSync(dir);
+  chmodSync(dir, 0o555);
+  return { source: dir, cleanupDir };
 }
 
 function isUnderBindRoot(target: string, roots: Set<string>): boolean {

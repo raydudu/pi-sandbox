@@ -65,6 +65,7 @@ describe("resolveToolPath", () => {
 describe("isPathAllowed", () => {
   const config: SandboxConfig = {
     enabled: true,
+    readOnly: false,
     denyRead: [],
     writable: ["/workspace", "/tmp"],
     denyWithin: ["/workspace/.git/hooks"],
@@ -103,6 +104,7 @@ describe("isPathAllowed", () => {
   it("handles trailing slashes in config paths", () => {
     const configWithSlashes: SandboxConfig = {
       enabled: true,
+      readOnly: false,
       denyRead: [],
       writable: ["/workspace/", "/tmp/"],
       denyWithin: ["/workspace/.git/hooks/"],
@@ -121,6 +123,7 @@ describe("isPathAllowed", () => {
   it("does not allow sibling paths that look like prefixes", () => {
     const c: SandboxConfig = {
       enabled: true,
+      readOnly: false,
       denyRead: [],
       writable: ["/workspace"],
       denyWithin: [],
@@ -138,6 +141,7 @@ describe("isPathAllowed", () => {
   it("normalizes .. in config writable paths", () => {
     const c: SandboxConfig = {
       enabled: true,
+      readOnly: false,
       denyRead: [],
       writable: ["/workspace/../shared"],
       denyWithin: [],
@@ -150,6 +154,7 @@ describe("isPathAllowed", () => {
   it("normalizes internal double slashes in config paths", () => {
     const c: SandboxConfig = {
       enabled: true,
+      readOnly: false,
       denyRead: [],
       writable: ["/workspace//src"],
       denyWithin: ["/workspace//src/.git"],
@@ -160,13 +165,14 @@ describe("isPathAllowed", () => {
   });
 
   it("denies everything when writable is empty", () => {
-    const c: SandboxConfig = { enabled: true, denyRead: [], writable: [], denyWithin: [], network: true };
+    const c: SandboxConfig = { enabled: true, readOnly: false, denyRead: [], writable: [], denyWithin: [], network: true };
     assert.equal(isPathAllowed("/anything", c), false);
   });
 
   it("does not deny when denyWithin is empty", () => {
     const c: SandboxConfig = {
       enabled: true,
+      readOnly: false,
       denyRead: [],
       writable: ["/workspace"],
       denyWithin: [],
@@ -178,6 +184,7 @@ describe("isPathAllowed", () => {
   it("applies denyRead separately from write policy", () => {
     const c: SandboxConfig = {
       enabled: true,
+      readOnly: false,
       denyRead: ["/workspace/secrets", "/tmp/private.log"],
       writable: ["/workspace"],
       denyWithin: ["/workspace/.git/hooks"],
@@ -192,6 +199,7 @@ describe("isPathAllowed", () => {
   it("blocks grep/find roots that contain denied descendants", () => {
     const c: SandboxConfig = {
       enabled: true,
+      readOnly: false,
       denyRead: [`${homedir()}/.ssh`, "/etc/passwd"],
       writable: ["/workspace"],
       denyWithin: [],
@@ -200,5 +208,18 @@ describe("isPathAllowed", () => {
     assert.equal(isPathSearchable(homedir(), c), false);
     assert.equal(isPathSearchable("/etc", c), false);
     assert.equal(isPathSearchable("/workspace", c), true);
+  });
+
+  it("blocks writes everywhere in read-only mode", () => {
+    const c: SandboxConfig = {
+      enabled: true,
+      readOnly: true,
+      denyRead: [],
+      writable: [],
+      denyWithin: [],
+      network: true,
+    };
+    assert.equal(isPathAllowed("/workspace/file.ts", c), false);
+    assert.equal(isPathAllowed("/tmp/output", c), false);
   });
 });

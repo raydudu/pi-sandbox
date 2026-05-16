@@ -79,6 +79,9 @@ By default, the extension allows writes to:
 
 By default, the extension does not block reads unless `denyRead` is configured.
 
+`--sandbox-readonly` is a quick way to disable all filesystem writes regardless of `writable`, while keeping read access governed by the existing `denyRead` policy.
+If sandboxing is enabled but no supported OS provider is available, bash commands now fail instead of silently running unsandboxed.
+
 For recursive read tools like `grep` and `find`, pi-sandbox blocks starting from a parent path that would traverse into a denied subtree.
 
 And blocks:
@@ -107,6 +110,7 @@ Startup flags:
 
 ```bash
 pi -e ./index.ts --sandbox
+pi -e ./index.ts --sandbox-readonly
 pi -e ./index.ts --no-sandbox
 ```
 
