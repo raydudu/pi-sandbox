@@ -3,6 +3,10 @@
   "version": "0.1.2",
   "description": "OS-level sandbox for pi coding agent — macOS sandbox-exec / Linux bubblewrap kernel-enforced isolation",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nqbao/pi-sandbox"
+  },
   "license": "MIT",
   "keywords": ["pi-package"],
   "files": [
