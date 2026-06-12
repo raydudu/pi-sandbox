@@ -115,7 +115,9 @@ export function buildSandboxExecProfile(config: SandboxConfig): string {
     '  (global-name "com.apple.bsd.dirhelper")',
     '  (global-name "com.apple.cfprefsd.daemon")',
     '  (global-name "com.apple.cfprefsd.agent")',
-    '  (global-name "com.apple.SecurityServer"))',
+    '  (global-name "com.apple.SecurityServer")',
+    '  (global-name "com.apple.trustd.agent")',
+    ')',
     "; hardware + kernel info",
     "(allow sysctl-read)",
   );
